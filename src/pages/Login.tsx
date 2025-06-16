@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Wallet as WalletIcon, Loader2, Anchor, Mail, Clock, CheckCircle, AlertTriangle, UserPlus, LogIn, ArrowLeft, CreditCard, FileText, Globe, User, Calendar, Hash, Phone } from 'lucide-react';
+import { Wallet as WalletIcon, Loader2, Anchor, Mail, Clock, CheckCircle, AlertTriangle, UserPlus, LogIn, ArrowLeft, CreditCard, FileText, Globe, User, Calendar, Hash, Phone, Eye, EyeOff } from 'lucide-react';
 import { BrowserProvider } from 'ethers';
 import { supabase } from '../lib/supabase';
 
@@ -15,9 +15,17 @@ interface IDVerificationData {
 export function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [step, setStep] = useState<'connect' | 'options' | 'id-selection' | 'pan-verification' | 'creating' | 'success'>('connect');
+  const [step, setStep] = useState<'connect' | 'auth-method' | 'email-options' | 'email-signup' | 'email-login' | 'id-selection' | 'pan-verification' | 'creating' | 'success'>('connect');
   const [authMode, setAuthMode] = useState<'signup' | 'login' | null>(null);
+  const [authMethod, setAuthMethod] = useState<'metamask' | 'email' | null>(null);
   const [walletAddress, setWalletAddress] = useState<string>('');
+  const [emailData, setEmailData] = useState({
+    email: '',
+    password: '',
+    confirmPassword: ''
+  });
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [idVerificationData, setIdVerificationData] = useState<IDVerificationData>({
     panNumber: '',
     fullName: '',
@@ -27,7 +35,20 @@ export function Login() {
   });
   const navigate = useNavigate();
 
-  const createOrUpdateProfile = async (address: string, verificationData?: IDVerificationData) => {
+  // Generate a unique wallet-like address for email users
+  const generateEmailWalletAddress = (email: string): string => {
+    // Create a deterministic address based on email
+    const hash = email.toLowerCase().split('').reduce((a, b) => {
+      a = ((a << 5) - a) + b.charCodeAt(0);
+      return a & a;
+    }, 0);
+    
+    // Convert to hex and pad to create a wallet-like address
+    const hexHash = Math.abs(hash).toString(16).padStart(8, '0');
+    return `0xe${hexHash}${'0'.repeat(32 - hexHash.length)}`;
+  };
+
+  const createOrUpdateProfile = async (address: string, verificationData?: IDVerificationData, isEmailUser: boolean = false) => {
     try {
       console.log('Creating/updating profile for address:', address);
       
@@ -45,8 +66,8 @@ export function Login() {
 
       const profileData = {
         address: address.toLowerCase(),
-        username: verificationData?.fullName || `User_${address.slice(2, 8)}`,
-        bio: 'New Kraken user',
+        username: verificationData?.fullName || (isEmailUser ? `User_${address.slice(2, 8)}` : `User_${address.slice(2, 8)}`),
+        bio: isEmailUser ? 'Email user on Kraken' : 'New Kraken user',
         avatar_url: '',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
@@ -70,7 +91,7 @@ export function Login() {
 
       // Store ID verification data if provided
       if (verificationData && authMode === 'signup') {
-        await storeIdVerificationData(address, verificationData);
+        await storeIdVerificationData(address, verificationData, isEmailUser);
       }
     } catch (error) {
       console.error('Error in createOrUpdateProfile:', error);
@@ -78,7 +99,7 @@ export function Login() {
     }
   };
 
-  const storeIdVerificationData = async (address: string, verificationData: IDVerificationData) => {
+  const storeIdVerificationData = async (address: string, verificationData: IDVerificationData, isEmailUser: boolean) => {
     try {
       // Create a comprehensive verification record
       const verificationRecord = {
@@ -93,7 +114,8 @@ export function Login() {
         submittedAt: new Date().toISOString(),
         verifiedAt: null,
         verifiedBy: null,
-        notes: ''
+        notes: '',
+        userType: isEmailUser ? 'email' : 'metamask'
       };
 
       console.log('Storing comprehensive ID verification data for manual verification:', verificationRecord);
@@ -120,13 +142,22 @@ export function Login() {
     }
   };
 
-  const authenticateWithSupabase = async (address: string, mode: 'signup' | 'login'): Promise<boolean> => {
+  const authenticateWithSupabase = async (address: string, mode: 'signup' | 'login', isEmailUser: boolean = false): Promise<boolean> => {
     try {
-      console.log(`Authenticating with Supabase for address: ${address}, mode: ${mode}`);
+      console.log(`Authenticating with Supabase for address: ${address}, mode: ${mode}, isEmailUser: ${isEmailUser}`);
       
-      // Create a deterministic email and password from the wallet address
-      const email = `${address.toLowerCase()}@kraken.web3`;
-      const password = `kraken_${address.toLowerCase()}_secure_2025`;
+      let email: string;
+      let password: string;
+
+      if (isEmailUser) {
+        // For email users, use their actual email and password
+        email = emailData.email;
+        password = emailData.password;
+      } else {
+        // For MetaMask users, create deterministic email and password
+        email = `${address.toLowerCase()}@kraken.web3`;
+        password = `kraken_${address.toLowerCase()}_secure_2025`;
+      }
 
       // First, try to sign out any existing session
       await supabase.auth.signOut();
@@ -139,14 +170,14 @@ export function Login() {
           options: {
             data: {
               wallet_address: address.toLowerCase(),
-              user_type: 'wallet'
+              user_type: isEmailUser ? 'email' : 'metamask'
             }
           }
         });
 
         if (signUpError) {
           if (signUpError.message?.includes('User already registered')) {
-            throw new Error('This wallet address is already registered. Please use the Login option instead.');
+            throw new Error('This email address is already registered. Please use the Login option instead.');
           }
           throw signUpError;
         }
@@ -166,7 +197,7 @@ export function Login() {
 
         if (signInError) {
           if (signInError.message?.includes('Invalid login credentials')) {
-            throw new Error('This wallet address is not registered. Please use the Sign Up option instead.');
+            throw new Error('Invalid email or password. Please check your credentials or use the Sign Up option.');
           }
           throw signInError;
         }
@@ -207,9 +238,10 @@ export function Login() {
       const address = accounts[0];
       console.log('Connected to MetaMask with address:', address);
       setWalletAddress(address);
+      setAuthMethod('metamask');
 
       // Show options for sign up or login
-      setStep('options');
+      setStep('auth-method');
       setLoading(false);
 
     } catch (err: any) {
@@ -231,16 +263,92 @@ export function Login() {
     }
   };
 
+  const handleEmailLogin = () => {
+    setAuthMethod('email');
+    setStep('email-options');
+  };
+
+  const handleEmailAuthChoice = (mode: 'signup' | 'login') => {
+    setAuthMode(mode);
+    if (mode === 'signup') {
+      setStep('email-signup');
+    } else {
+      setStep('email-login');
+    }
+  };
+
+  const validateEmail = (email: string): boolean => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  };
+
+  const validatePassword = (password: string): boolean => {
+    // At least 8 characters, 1 uppercase, 1 lowercase, 1 number
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[a-zA-Z\d@$!%*?&]{8,}$/;
+    return passwordRegex.test(password);
+  };
+
+  const handleEmailSignup = () => {
+    if (!validateEmail(emailData.email)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+
+    if (!validatePassword(emailData.password)) {
+      setError('Password must be at least 8 characters with uppercase, lowercase, and number.');
+      return;
+    }
+
+    if (emailData.password !== emailData.confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+
+    // Generate wallet address for email user
+    const generatedAddress = generateEmailWalletAddress(emailData.email);
+    setWalletAddress(generatedAddress);
+    
+    // Set email in ID verification data
+    setIdVerificationData(prev => ({
+      ...prev,
+      email: emailData.email
+    }));
+
+    // Proceed to ID verification
+    setStep('id-selection');
+  };
+
+  const handleEmailLogin = async () => {
+    if (!validateEmail(emailData.email)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+
+    if (!emailData.password) {
+      setError('Please enter your password.');
+      return;
+    }
+
+    // Generate the same wallet address for this email
+    const generatedAddress = generateEmailWalletAddress(emailData.email);
+    setWalletAddress(generatedAddress);
+
+    // Proceed with authentication
+    await proceedWithAuthentication('login', true);
+  };
+
   const handleAuthChoice = async (mode: 'signup' | 'login') => {
     setAuthMode(mode);
     setError('');
     
-    if (mode === 'signup') {
-      // For signup, go to ID selection
-      setStep('id-selection');
-    } else {
-      // For login, proceed directly to authentication
-      await proceedWithAuthentication(mode);
+    if (authMethod === 'metamask') {
+      if (mode === 'signup') {
+        // For MetaMask signup, go to ID selection
+        setStep('id-selection');
+      } else {
+        // For MetaMask login, proceed directly to authentication
+        await proceedWithAuthentication(mode, false);
+      }
     }
   };
 
@@ -270,11 +378,6 @@ export function Login() {
     // Indian phone number format: 10 digits starting with 6-9
     const phoneRegex = /^[6-9]\d{9}$/;
     return phoneRegex.test(phone);
-  };
-
-  const validateEmail = (email: string): boolean => {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
   };
 
   const handlePanVerification = async () => {
@@ -310,10 +413,10 @@ export function Login() {
     }
 
     // Proceed with authentication including ID verification
-    await proceedWithAuthentication('signup');
+    await proceedWithAuthentication('signup', authMethod === 'email');
   };
 
-  const proceedWithAuthentication = async (mode: 'signup' | 'login') => {
+  const proceedWithAuthentication = async (mode: 'signup' | 'login', isEmailUser: boolean = false) => {
     setLoading(true);
     setStep('creating');
     setError('');
@@ -328,7 +431,7 @@ export function Login() {
       localStorage.removeItem('isAuthenticated');
 
       // Authenticate with Supabase
-      const authSuccess = await authenticateWithSupabase(walletAddress, mode);
+      const authSuccess = await authenticateWithSupabase(walletAddress, mode, isEmailUser);
       
       if (!authSuccess) {
         throw new Error('Authentication failed');
@@ -337,12 +440,14 @@ export function Login() {
       // Create or update profile (with ID verification data for signup)
       await createOrUpdateProfile(
         walletAddress, 
-        mode === 'signup' ? idVerificationData : undefined
+        mode === 'signup' ? idVerificationData : undefined,
+        isEmailUser
       );
 
       // Store wallet address and authentication status
       localStorage.setItem('walletAddress', walletAddress.toLowerCase());
       localStorage.setItem('isAuthenticated', 'true');
+      localStorage.setItem('userType', isEmailUser ? 'email' : 'metamask');
       
       console.log('Authentication and profile setup successful');
       
@@ -360,9 +465,15 @@ export function Login() {
       // Clear any partial authentication data
       localStorage.removeItem('walletAddress');
       localStorage.removeItem('isAuthenticated');
+      localStorage.removeItem('userType');
       
       setError(err.message || 'Authentication failed. Please try again.');
-      setStep(mode === 'signup' ? 'pan-verification' : 'options');
+      
+      if (authMethod === 'email') {
+        setStep(mode === 'signup' ? 'pan-verification' : 'email-login');
+      } else {
+        setStep(mode === 'signup' ? 'pan-verification' : 'auth-method');
+      }
     } finally {
       setLoading(false);
     }
@@ -370,18 +481,36 @@ export function Login() {
 
   const goBack = () => {
     switch (step) {
-      case 'options':
+      case 'auth-method':
+        if (authMethod === 'metamask') {
+          setStep('connect');
+          setAuthMethod(null);
+        } else {
+          setStep('email-options');
+        }
+        break;
+      case 'email-options':
         setStep('connect');
+        setAuthMethod(null);
+        break;
+      case 'email-signup':
+      case 'email-login':
+        setStep('email-options');
         setAuthMode(null);
         break;
       case 'id-selection':
-        setStep('options');
+        if (authMethod === 'email') {
+          setStep('email-signup');
+        } else {
+          setStep('auth-method');
+        }
         break;
       case 'pan-verification':
         setStep('id-selection');
         break;
       default:
         setStep('connect');
+        setAuthMethod(null);
         setAuthMode(null);
     }
     setError('');
@@ -472,20 +601,16 @@ export function Login() {
                 </div>
 
                 <button
-                  disabled
-                  className="w-full bg-zinc-800/50 text-zinc-500 py-3 px-4 rounded-lg cursor-not-allowed flex items-center justify-center space-x-2 group relative"
+                  onClick={handleEmailLogin}
+                  className="w-full bg-green-500 hover:bg-green-600 text-white py-3 px-4 rounded-lg transition-all transform hover:scale-105 flex items-center justify-center space-x-2"
                 >
                   <Mail className="w-5 h-5" />
-                  <span>Email Login</span>
-                  <Clock className="w-4 h-4 ml-2 opacity-0 group-hover:opacity-100 transition-opacity" />
-                  <span className="absolute top-full left-1/2 transform -translate-x-1/2 mt-2 px-2 py-1 bg-zinc-800 text-zinc-300 text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                    Coming Soon
-                  </span>
+                  <span>Continue with Email</span>
                 </button>
               </>
             )}
 
-            {step === 'options' && (
+            {step === 'auth-method' && (
               <div className="space-y-4">
                 <div className="text-center mb-6">
                   <h2 className="text-xl font-semibold text-zinc-100 mb-2">Choose an Option</h2>
@@ -519,6 +644,208 @@ export function Login() {
                   <ArrowLeft className="w-4 h-4" />
                   <span>Back</span>
                 </button>
+              </div>
+            )}
+
+            {step === 'email-options' && (
+              <div className="space-y-4">
+                <div className="text-center mb-6">
+                  <h2 className="text-xl font-semibold text-zinc-100 mb-2">Email Authentication</h2>
+                  <p className="text-sm text-zinc-400">
+                    Are you a new user or do you already have an account?
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => handleEmailAuthChoice('signup')}
+                  disabled={loading}
+                  className="w-full bg-blue-500 hover:bg-blue-600 text-white py-3 px-4 rounded-lg transition-all transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+                >
+                  <UserPlus className="w-5 h-5" />
+                  <span>Sign Up (New User)</span>
+                </button>
+
+                <button
+                  onClick={() => handleEmailAuthChoice('login')}
+                  disabled={loading}
+                  className="w-full bg-green-500 hover:bg-green-600 text-white py-3 px-4 rounded-lg transition-all transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+                >
+                  <LogIn className="w-5 h-5" />
+                  <span>Login (Existing User)</span>
+                </button>
+
+                <button
+                  onClick={goBack}
+                  className="w-full bg-zinc-700 hover:bg-zinc-600 text-zinc-300 py-2 px-4 rounded-lg transition-colors flex items-center justify-center space-x-2"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  <span>Back</span>
+                </button>
+              </div>
+            )}
+
+            {step === 'email-signup' && (
+              <div className="space-y-4">
+                <div className="text-center mb-6">
+                  <h2 className="text-xl font-semibold text-zinc-100 mb-2">Create Email Account</h2>
+                  <p className="text-sm text-zinc-400">
+                    Enter your email and create a secure password
+                  </p>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-300 mb-2">
+                      <Mail className="w-4 h-4 inline mr-2" />
+                      Email Address *
+                    </label>
+                    <input
+                      type="email"
+                      value={emailData.email}
+                      onChange={(e) => setEmailData(prev => ({ ...prev, email: e.target.value }))}
+                      placeholder="your.email@example.com"
+                      className="w-full bg-zinc-800 rounded-lg py-3 px-4 text-zinc-100 placeholder-zinc-500 border border-zinc-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-300 mb-2">
+                      Password *
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        value={emailData.password}
+                        onChange={(e) => setEmailData(prev => ({ ...prev, password: e.target.value }))}
+                        placeholder="Create a strong password"
+                        className="w-full bg-zinc-800 rounded-lg py-3 px-4 pr-12 text-zinc-100 placeholder-zinc-500 border border-zinc-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 transform -translate-y-1/2 text-zinc-400 hover:text-zinc-100"
+                      >
+                        {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                      </button>
+                    </div>
+                    <p className="text-xs text-zinc-500 mt-1">At least 8 characters with uppercase, lowercase, and number</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-300 mb-2">
+                      Confirm Password *
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showConfirmPassword ? 'text' : 'password'}
+                        value={emailData.confirmPassword}
+                        onChange={(e) => setEmailData(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                        placeholder="Confirm your password"
+                        className="w-full bg-zinc-800 rounded-lg py-3 px-4 pr-12 text-zinc-100 placeholder-zinc-500 border border-zinc-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        className="absolute right-3 top-1/2 transform -translate-y-1/2 text-zinc-400 hover:text-zinc-100"
+                      >
+                        {showConfirmPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex space-x-3">
+                  <button
+                    onClick={handleEmailSignup}
+                    disabled={loading}
+                    className="flex-1 bg-blue-500 hover:bg-blue-600 text-white py-3 px-4 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+                  >
+                    <CheckCircle className="w-5 h-5" />
+                    <span>Continue</span>
+                  </button>
+                  
+                  <button
+                    onClick={goBack}
+                    disabled={loading}
+                    className="bg-zinc-700 hover:bg-zinc-600 text-zinc-300 py-3 px-4 rounded-lg transition-colors flex items-center justify-center"
+                  >
+                    <ArrowLeft className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {step === 'email-login' && (
+              <div className="space-y-4">
+                <div className="text-center mb-6">
+                  <h2 className="text-xl font-semibold text-zinc-100 mb-2">Login to Your Account</h2>
+                  <p className="text-sm text-zinc-400">
+                    Enter your email and password to continue
+                  </p>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-300 mb-2">
+                      <Mail className="w-4 h-4 inline mr-2" />
+                      Email Address
+                    </label>
+                    <input
+                      type="email"
+                      value={emailData.email}
+                      onChange={(e) => setEmailData(prev => ({ ...prev, email: e.target.value }))}
+                      placeholder="your.email@example.com"
+                      className="w-full bg-zinc-800 rounded-lg py-3 px-4 text-zinc-100 placeholder-zinc-500 border border-zinc-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-300 mb-2">
+                      Password
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        value={emailData.password}
+                        onChange={(e) => setEmailData(prev => ({ ...prev, password: e.target.value }))}
+                        placeholder="Enter your password"
+                        className="w-full bg-zinc-800 rounded-lg py-3 px-4 pr-12 text-zinc-100 placeholder-zinc-500 border border-zinc-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 transform -translate-y-1/2 text-zinc-400 hover:text-zinc-100"
+                      >
+                        {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex space-x-3">
+                  <button
+                    onClick={handleEmailLogin}
+                    disabled={loading}
+                    className="flex-1 bg-green-500 hover:bg-green-600 text-white py-3 px-4 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+                  >
+                    {loading ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <>
+                        <LogIn className="w-5 h-5" />
+                        <span>Login</span>
+                      </>
+                    )}
+                  </button>
+                  
+                  <button
+                    onClick={goBack}
+                    disabled={loading}
+                    className="bg-zinc-700 hover:bg-zinc-600 text-zinc-300 py-3 px-4 rounded-lg transition-colors flex items-center justify-center"
+                  >
+                    <ArrowLeft className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
             )}
 
@@ -675,23 +1002,25 @@ export function Login() {
                     <p className="text-xs text-zinc-500 mt-1">10-digit Indian mobile number</p>
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-zinc-300 mb-2">
-                      <Mail className="w-4 h-4 inline mr-2" />
-                      Email Address *
-                    </label>
-                    <input
-                      type="email"
-                      value={idVerificationData.email}
-                      onChange={(e) => setIdVerificationData(prev => ({
-                        ...prev,
-                        email: e.target.value.toLowerCase()
-                      }))}
-                      placeholder="your.email@example.com"
-                      className="w-full bg-zinc-800 rounded-lg py-3 px-4 text-zinc-100 placeholder-zinc-500 border border-zinc-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
-                    <p className="text-xs text-zinc-500 mt-1">We'll send verification updates to this email</p>
-                  </div>
+                  {authMethod !== 'email' && (
+                    <div>
+                      <label className="block text-sm font-medium text-zinc-300 mb-2">
+                        <Mail className="w-4 h-4 inline mr-2" />
+                        Email Address *
+                      </label>
+                      <input
+                        type="email"
+                        value={idVerificationData.email}
+                        onChange={(e) => setIdVerificationData(prev => ({
+                          ...prev,
+                          email: e.target.value.toLowerCase()
+                        }))}
+                        placeholder="your.email@example.com"
+                        className="w-full bg-zinc-800 rounded-lg py-3 px-4 text-zinc-100 placeholder-zinc-500 border border-zinc-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                      <p className="text-xs text-zinc-500 mt-1">We'll send verification updates to this email</p>
+                    </div>
+                  )}
                 </div>
 
                 <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-4">

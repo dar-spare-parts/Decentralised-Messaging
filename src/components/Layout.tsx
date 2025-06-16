@@ -7,14 +7,16 @@ import {
   LogOut,
   Anchor,
   User,
-  X
+  X,
+  Mail,
+  Shield
 } from 'lucide-react';
 import { useContext } from 'react';
 import { AuthContext } from '../App';
 
 export function Layout() {
   const location = useLocation();
-  const { logout, walletAddress } = useContext(AuthContext);
+  const { logout, walletAddress, userType } = useContext(AuthContext);
   const navigate = useNavigate();
   const [showProfileModal, setShowProfileModal] = useState(false);
 
@@ -29,6 +31,18 @@ export function Layout() {
 
   const closeProfileModal = () => {
     setShowProfileModal(false);
+  };
+
+  const getUserTypeIcon = () => {
+    return userType === 'email' ? (
+      <Mail className="w-4 h-4 text-green-500" title="Email User" />
+    ) : (
+      <Shield className="w-4 h-4 text-blue-500" title="MetaMask User" />
+    );
+  };
+
+  const getUserTypeLabel = () => {
+    return userType === 'email' ? 'Email Account' : 'MetaMask Wallet';
   };
 
   return (
@@ -111,7 +125,19 @@ export function Layout() {
               <div className="space-y-3">
                 <div>
                   <label className="block text-sm font-medium text-zinc-400 mb-1">
-                    Wallet Address
+                    Account Type
+                  </label>
+                  <div className="bg-zinc-800 rounded-lg p-3 border border-zinc-700">
+                    <div className="flex items-center space-x-2">
+                      {getUserTypeIcon()}
+                      <span className="text-zinc-100 text-sm">{getUserTypeLabel()}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-zinc-400 mb-1">
+                    {userType === 'email' ? 'Account Address' : 'Wallet Address'}
                   </label>
                   <div className="bg-zinc-800 rounded-lg p-3 border border-zinc-700">
                     <p className="text-zinc-100 font-mono text-sm break-all">
@@ -154,7 +180,7 @@ export function Layout() {
                   }}
                   className="w-full bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded-lg transition-colors"
                 >
-                  Copy Wallet Address
+                  Copy Address
                 </button>
               </div>
             </div>

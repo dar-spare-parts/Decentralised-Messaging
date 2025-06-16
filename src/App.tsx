@@ -12,18 +12,21 @@ import { supabase } from './lib/supabase';
 interface AuthContextType {
   isAuthenticated: boolean;
   walletAddress: string | null;
+  userType: 'metamask' | 'email' | null;
   logout: () => void;
 }
 
 export const AuthContext = createContext<AuthContextType>({
   isAuthenticated: false,
   walletAddress: null,
+  userType: null,
   logout: () => {},
 });
 
 export function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
+  const [userType, setUserType] = useState<'metamask' | 'email' | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -36,57 +39,83 @@ export function App() {
         const { data: { session }, error } = await supabase.auth.getSession();
         const storedAddress = localStorage.getItem('walletAddress');
         const storedAuth = localStorage.getItem('isAuthenticated');
+        const storedUserType = localStorage.getItem('userType') as 'metamask' | 'email' | null;
         
         console.log('Auth check results:', { 
           hasSession: !!session, 
           storedAddress, 
           storedAuth,
+          storedUserType,
           sessionUser: session?.user?.id 
         });
         
-        if (session && storedAuth === 'true' && storedAddress) {
+        if (session && storedAuth === 'true' && storedAddress && storedUserType) {
           // Valid session and stored credentials
           setIsAuthenticated(true);
           setWalletAddress(storedAddress);
-          console.log('User authenticated with session and stored address:', storedAddress);
-        } else if (storedAuth === 'true' && storedAddress) {
+          setUserType(storedUserType);
+          console.log('User authenticated with session and stored address:', storedAddress, 'type:', storedUserType);
+        } else if (storedAuth === 'true' && storedAddress && storedUserType) {
           // Has stored auth but no session - try to restore
           console.log('Has stored auth but no session, attempting to restore...');
           
-          // Try to authenticate with stored address
-          const email = `${storedAddress}@kraken.web3`;
-          const password = `kraken_${storedAddress}_secure_2025`;
-          
-          const { data, error: signInError } = await supabase.auth.signInWithPassword({
-            email,
-            password,
-          });
-          
-          if (!signInError && data.session) {
-            setIsAuthenticated(true);
-            setWalletAddress(storedAddress);
-            console.log('Successfully restored session for:', storedAddress);
-          } else {
-            console.log('Failed to restore session, clearing stored auth');
+          // Try to authenticate based on user type
+          let email: string;
+          let password: string;
+
+          if (storedUserType === 'email') {
+            // For email users, we need to get their actual email from the stored address
+            // This is a limitation - in production, you'd store the email separately
+            console.log('Cannot restore email user session without stored email');
             localStorage.removeItem('isAuthenticated');
             localStorage.removeItem('walletAddress');
+            localStorage.removeItem('userType');
             setIsAuthenticated(false);
             setWalletAddress(null);
+            setUserType(null);
+          } else {
+            // For MetaMask users, use the deterministic email/password
+            email = `${storedAddress}@kraken.web3`;
+            password = `kraken_${storedAddress}_secure_2025`;
+            
+            const { data, error: signInError } = await supabase.auth.signInWithPassword({
+              email,
+              password,
+            });
+            
+            if (!signInError && data.session) {
+              setIsAuthenticated(true);
+              setWalletAddress(storedAddress);
+              setUserType(storedUserType);
+              console.log('Successfully restored session for:', storedAddress);
+            } else {
+              console.log('Failed to restore session, clearing stored auth');
+              localStorage.removeItem('isAuthenticated');
+              localStorage.removeItem('walletAddress');
+              localStorage.removeItem('userType');
+              setIsAuthenticated(false);
+              setWalletAddress(null);
+              setUserType(null);
+            }
           }
         } else {
           // No valid authentication
           console.log('No valid authentication found');
           localStorage.removeItem('isAuthenticated');
           localStorage.removeItem('walletAddress');
+          localStorage.removeItem('userType');
           setIsAuthenticated(false);
           setWalletAddress(null);
+          setUserType(null);
         }
       } catch (error) {
         console.error('Error checking authentication:', error);
         localStorage.removeItem('isAuthenticated');
         localStorage.removeItem('walletAddress');
+        localStorage.removeItem('userType');
         setIsAuthenticated(false);
         setWalletAddress(null);
+        setUserType(null);
       } finally {
         setLoading(false);
       }
@@ -100,17 +129,21 @@ export function App() {
       
       if (event === 'SIGNED_IN' && session) {
         const storedAddress = localStorage.getItem('walletAddress');
-        if (storedAddress) {
+        const storedUserType = localStorage.getItem('userType') as 'metamask' | 'email' | null;
+        if (storedAddress && storedUserType) {
           setIsAuthenticated(true);
           setWalletAddress(storedAddress);
-          console.log('Auth state: signed in with address:', storedAddress);
+          setUserType(storedUserType);
+          console.log('Auth state: signed in with address:', storedAddress, 'type:', storedUserType);
         }
       } else if (event === 'SIGNED_OUT') {
         console.log('Auth state: signed out');
         localStorage.removeItem('isAuthenticated');
         localStorage.removeItem('walletAddress');
+        localStorage.removeItem('userType');
         setIsAuthenticated(false);
         setWalletAddress(null);
+        setUserType(null);
       }
     });
 
@@ -132,10 +165,12 @@ export function App() {
     // Clear local storage
     localStorage.removeItem('isAuthenticated');
     localStorage.removeItem('walletAddress');
+    localStorage.removeItem('userType');
     
     // Update state
     setIsAuthenticated(false);
     setWalletAddress(null);
+    setUserType(null);
   };
 
   // Show loading spinner while checking authentication
@@ -151,7 +186,7 @@ export function App() {
   }
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, walletAddress, logout }}>
+    <AuthContext.Provider value={{ isAuthenticated, walletAddress, userType, logout }}>
       <BrowserRouter>
         <Routes>
           <Route
